@@ -125,35 +125,9 @@
 
           const canvasWidth = rect.width;
           const canvasHeight = rect.height;
-          const videoAspect = remoteWidth / remoteHeight;
-          const canvasAspect = canvasWidth / canvasHeight;
 
-          let videoWidth, videoHeight, offsetX, offsetY;
-
-          if (canvasAspect > videoAspect) {
-            videoHeight = canvasHeight;
-            videoWidth = videoHeight * videoAspect;
-            offsetX = (canvasWidth - videoWidth) / 2;
-            offsetY = 0;
-          } else {
-            console.log("Canvas is smaller than video aspect ratio");
-            videoWidth = canvasWidth;
-            videoHeight = videoWidth / videoAspect;
-            offsetX = 0;
-            offsetY = (canvasHeight - videoHeight) / 2;
-          }
-
-          const relativeX = Math.min(
-            Math.max(clientX - offsetX, 0),
-            videoWidth
-          );
-          const relativeY = Math.min(
-            Math.max(clientY - offsetY, 0),
-            videoHeight
-          );
-
-          const scaledX = Math.round((relativeX / videoWidth) * remoteWidth);
-          const scaledY = Math.round((relativeY / videoHeight) * remoteHeight);
+          const scaledX = Math.round((clientX / canvasWidth) * remoteWidth);
+          const scaledY = Math.round((clientY / canvasHeight) * remoteHeight);
 
           sendControlEvent("mousemove", { x: scaledX, y: scaledY });
         }
