@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dashboard</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        height: 100%;
+        width: 100%;
+      }
+
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+    </style>
+  </head>
+
+  <body>
+    <canvas id="videoCanvas"></canvas>
+    <script src="https://cdn.jsdelivr.net/gh/phoboslab/jsmpeg@master/jsmpeg.min.js"></script>
+    <script>
+      let remoteWidth = 1920; // Default remote screen width
+      let remoteHeight = 1080; // Default remote screen height
+      async function getRemoteScreenSize() {
+        const response = await fetch("/screen-size");
+        if (!response.ok) throw new Error("Failed to get screen size");
+        const { width, height } = await response.json();
+        return { width, height };
+      }
+      let canvas = document.getElementById("videoCanvas");
+      let controlWs;
+      async function startStream() {
+        let token = localStorage.getItem("stream_token");
+        if (!token) {
+          const password = prompt("Enter password:");
+          const response = await fetch("/auth", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password }),
+          });
+          const result = await response.json();
+          if (!result.success) {
+            alert("Invalid password.");
+            return;
+          }
+          token = result.token;
+          localStorage.setItem("stream_token", token);
+        }
+
+        const basePort = parseInt(location.port, 10) || 5000;
+
+        const player = new JSMpeg.Player(
+          `wss://${location.hostname}:${basePort}/?token=${token}`,
+          {
+            canvas: document.getElementById("videoCanvas"),
+          }
+        );
+
+        controlWs = new WebSocket(`wss://${location.hostname}:${basePort + 1}`);
+
+        let getRemoteScreenSizeResult = await getRemoteScreenSize();
+        remoteHeight = getRemoteScreenSizeResult.height;
+        remoteWidth = getRemoteScreenSizeResult.width;
+      }
+
+      function sendControlEvent(type, data) {
+        if (controlWs && controlWs.readyState === 1) {
+          controlWs.send(JSON.stringify({ type, ...data }));
+        }
+      }
+
+      canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
+      canvas.addEventListener(
+        "wheel",
+        function (e) {
+          if (e.deltaX !== 0 || e.deltaY !== 0) {
+            e.preventDefault();
+            sendControlEvent("wheel", { deltaX: e.deltaX, deltaY: e.deltaY });
+          }
+        },
+        { passive: false }
+      );
+
+      window.addEventListener("keydown", (e) => {
+        e.preventDefault();
+        sendControlEvent("keydown", { key: e.key });
+      });
+      window.addEventListener("keyup", (e) => {
+        e.preventDefault();
+        sendControlEvent("keyup", { key: e.key });
+      });
+      let lastMouseX = 0;
+      let lastMouseY = 0;
+      let lastSendTime = 0;
+      const MIN_DISTANCE = 50;
+      const MIN_DELAY = 100; // milliseconds
+
+      canvas.addEventListener("mousemove", (e) => {
+        e.preventDefault();
+
+        const now = Date.now();
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.clientX - rect.left;
+        const clientY = e.clientY - rect.top;
+
+        const dx = Math.abs(clientX - lastMouseX);
+        const dy = Math.abs(clientY - lastMouseY);
+
+        if (
+          dx > MIN_DISTANCE ||
+          dy > MIN_DISTANCE ||
+          now - lastSendTime > MIN_DELAY
+        ) {
+          lastMouseX = clientX;
+          lastMouseY = clientY;
+          lastSendTime = now;
+
+          const canvasWidth = rect.width;
+          const canvasHeight = rect.height;
+          const videoAspect = remoteWidth / remoteHeight;
+          const canvasAspect = canvasWidth / canvasHeight;
+
+          let videoWidth, videoHeight, offsetX, offsetY;
+
+          if (canvasAspect > videoAspect) {
+            videoHeight = canvasHeight;
+            videoWidth = videoHeight * videoAspect;
+            offsetX = (canvasWidth - videoWidth) / 2;
+            offsetY = 0;
+          } else {
+            console.log("Canvas is smaller than video aspect ratio");
+            videoWidth = canvasWidth;
+            videoHeight = videoWidth / videoAspect;
+            offsetX = 0;
+            offsetY = (canvasHeight - videoHeight) / 2;
+          }
+
+          const relativeX = Math.min(
+            Math.max(clientX - offsetX, 0),
+            videoWidth
+          );
+          const relativeY = Math.min(
+            Math.max(clientY - offsetY, 0),
+            videoHeight
+          );
+
+          const scaledX = Math.round((relativeX / videoWidth) * remoteWidth);
+          const scaledY = Math.round((relativeY / videoHeight) * remoteHeight);
+
+          sendControlEvent("mousemove", { x: scaledX, y: scaledY });
+        }
+      });
+
+      canvas.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        sendControlEvent("mousedown", { button: e.button });
+      });
+      canvas.addEventListener("mouseup", (e) => {
+        e.preventDefault();
+        sendControlEvent("mouseup", { button: e.button });
+      });
+
+      startStream();
+    </script>
+  </body>
+</html>
